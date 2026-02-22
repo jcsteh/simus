@@ -1,3 +1,4 @@
+<!doctype html>
 <meta charset="utf-8">
 <title>Simus</title>
 <script src="https://unpkg.com/tone@15.5.1"></script>
@@ -25,9 +26,13 @@
 	<p><button id="useKeyboard">Use computer keyboard only</button></p>
 </div>
 <dialog id="midiInputDialog">
-	<form method="dialog">
-		<label>Choose MIDI input: <select id="midiInput"></label>
+	<form id="midiInputForm" method="dialog">
+		<label>Choose MIDI input: <select id="midiInput"></select></label>
 		<input type="submit" value="Select">
+	</form>
+	<form id="noMidiInputs" hidden method="dialog">
+		<p>No MIDI inputs available.</p>
+		<input type="submit" value="Continue with computer keyboard">
 	</form>
 </dialog>
 <div id="mainScreen" hidden role="application" tabindex="0">
@@ -96,9 +101,15 @@ async function init(useMidi) {
 			option.textContent = input.name;
 			inputSel.append(option);
 		}
+		if (inputSel.options.length == 0) {
+			document.getElementById("midiInputForm").hidden = true;
+			document.getElementById("noMidiInputs").hidden = false;
+		}
 		const dialog = document.getElementById("midiInputDialog");
 		dialog.addEventListener("close", () => {
-			midiIn = midi.inputs.get(inputSel.selectedOptions[0].dataset.id);
+			if (inputSel.selectedOptions.length >= 1) {
+				midiIn = midi.inputs.get(inputSel.selectedOptions[0].dataset.id);
+			}
 			start();
 		}, { once: true });
 		dialog.showModal();
