@@ -4,7 +4,7 @@
 <h1>Simus</h1>
 <div id="startScreen">
 	<p>Copyright 2026 James Teh</p>
-	<p>Version 2</p>
+	<p>Version 3</p>
 	<p><button id="useMidi">Use MIDI input</button></p>
 	<p><button id="useKeyboard">Use computer keyboard only</button></p>
 </div>
@@ -64,6 +64,7 @@ let level = 0;
 let goodPlayer;
 let badPlayer;
 let nextLevelPlayer;
+let newLifePlayer;
 let loopPlayer;
 
 async function init(useMidi) {
@@ -108,6 +109,9 @@ async function start() {
 	).toDestination();
 	gameOverPlayer = new Tone.Player({
 		url: "gameOver.mp3", volume: -3 }
+	).toDestination();
+	newLifePlayer = new Tone.Player({
+		url: "newLife.wav", volume: -3 }
 	).toDestination();
 	loopPlayer = new Tone.Player({ loop: true, volume: -3 }).toDestination();
 	// We want to start the loop immediately, but we can't start it until the
@@ -255,9 +259,14 @@ function checkResponse() {
 		return;
 	}
 	if (correctNotes == call.length) {
-		goodPlayer.start(goodPlayer.immediate());
 		++score;
 		scoreNode.textContent = score;
+		if (score % 10 == 0 && mistakes > 0) {
+			--mistakes;
+			newLifePlayer.start(newLifePlayer.immediate());
+		} else {
+			goodPlayer.start(goodPlayer.immediate());
+		}
 	} else {
 		++mistakes;
 		if (mistakes == 5) {
