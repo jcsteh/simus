@@ -21,6 +21,7 @@
 <dialog id="gameOverDialog">
 	<form method="dialog">
 		<h1>Game Over! 🥹</h1>
+		<p id="gameOverMessage"></p>
 		<p><input type="submit" value="Try again"></p>
 	</form>
 </dialog>
@@ -46,6 +47,7 @@ const mainScreen = document.getElementById("mainScreen");
 const levelNode = document.getElementById("level");
 const scoreNode = document.getElementById("score");
 const gameOverDialog = document.getElementById("gameOverDialog");
+const gameOverMessage = document.getElementById("gameOverMessage");
 // Two synths for the call (computer) and response (player).
 let callSynth;
 let respSynth;
@@ -306,6 +308,8 @@ function gameOver() {
 	const transport = Tone.getTransport();
 	transport.stop();
 	transport.cancel();
+	gameOverMessage.textContent =
+		`You reached level ${level + 1} with a score of ${ score }.`;
 	score = 0;
 	level = 0;
 	mistakes = 0;
