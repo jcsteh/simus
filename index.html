@@ -1,0 +1,311 @@
+<meta charset="utf-8">
+<title>Simus</title>
+<script src="https://unpkg.com/tone@15.5.1"></script>
+<h1>Simus</h1>
+<div id="startScreen">
+	<p>Copyright 2026 James Teh</p>
+	<p>Version 2</p>
+	<p><button id="useMidi">Use MIDI input</button></p>
+	<p><button id="useKeyboard">Use computer keyboard only</button></p>
+</div>
+<dialog id="midiInputDialog">
+	<form method="dialog">
+		<label>Choose MIDI input: <select id="midiInput"></label>
+		<input type="submit" value="Select">
+	</form>
+</dialog>
+<div id="mainScreen" hidden role="application" tabindex="0">
+	<h2>Level <span id="level"></span></h2>
+	<p>Score: <span id="score"></span></p>
+</div>
+<dialog id="gameOverDialog">
+	<form method="dialog">
+		<h1>Game Over! 🥹</h1>
+		<p><input type="submit" value="Try again"></p>
+	</form>
+</dialog>
+
+<script>
+const MIDI_NOTE_ON_C0 = 0x90;
+const MIDI_NOTE_ON_C15 = MIDI_NOTE_ON_C0 + 15;
+const MIDI_NOTE_OFF_C0 = 0x80;
+const MIDI_NOTE_OFF_C15 = MIDI_NOTE_OFF_C0 + 15;
+const LEVELS = [
+	// lengths are measured in sixteenths.
+	{ lengths: [4], winScore: 20 },
+	{ lengths: [4, 2], winScore: 50 },
+	{ lengths: [4, 2, 1], winScore: 100 },
+];
+
+const scale = ["A3", "B3", "C4", "D4", "E4", "F4", "G4", "A4"];
+// Key codes corresponding to the notes of the scale.
+const keyCodes = [
+	"KeyA", "KeyS", "KeyD", "KeyF", "KeyG", "KeyH", "KeyJ", "KeyK"
+];
+const mainScreen = document.getElementById("mainScreen");
+const levelNode = document.getElementById("level");
+const scoreNode = document.getElementById("score");
+const gameOverDialog = document.getElementById("gameOverDialog");
+// Two synths for the call (computer) and response (player).
+let callSynth;
+let respSynth;
+// Information about the notes in the call just played.
+let call = [];
+// The measure/bar at which the current call begins.
+let measure = 0;
+let midiIn = null;
+let lastRespNote;
+// The number of correct notes in the response.
+let correctNotes = 0;
+let score = 0;
+let mistakes = 0;
+let level = 0;
+// Players for various sounds.
+let goodPlayer;
+let badPlayer;
+let nextLevelPlayer;
+let loopPlayer;
+
+async function init(useMidi) {
+	document.getElementById("startScreen").hidden = true;
+	if (useMidi) {
+		const midi = await navigator.requestMIDIAccess();
+		const inputSel = document.getElementById("midiInput");
+		for (const input of midi.inputs.values()) {
+			const option = document.createElement("option");
+			option.dataset.id = input.id;
+			option.textContent = input.name;
+			inputSel.append(option);
+		}
+		const dialog = document.getElementById("midiInputDialog");
+		dialog.addEventListener("close", () => {
+			midiIn = midi.inputs.get(inputSel.selectedOptions[0].dataset.id);
+			start();
+		}, { once: true });
+		dialog.showModal();
+	} else {
+		start();
+	}
+}
+
+async function start() {
+	mainScreen.hidden = false;
+	mainScreen.focus();
+	await Tone.start();
+	callSynth = new Tone.Synth({ envelope: { release: 0.1 } }).toDestination();
+	respSynth = new Tone.Synth({
+		envelope: { release: 0.1 },
+		oscillator: { type: "sine" }
+	}).toDestination();
+	goodPlayer = new Tone.Player({
+		url: "good.wav", volume: -3
+	}).toDestination();
+	badPlayer = new Tone.Player({
+		url: "bad.wav", volume: -3
+	}).toDestination();
+	nextLevelPlayer = new Tone.Player({
+		url: "nextLevel.mp3", volume: -3 }
+	).toDestination();
+	gameOverPlayer = new Tone.Player({
+		url: "gameOver.mp3", volume: -3 }
+	).toDestination();
+	loopPlayer = new Tone.Player({ loop: true, volume: -3 }).toDestination();
+	// We want to start the loop immediately, but we can't start it until the
+	// buffer is loaded. Wait for it to load.
+	await loopPlayer.load("loop1.mp3");
+	const transport = Tone.getTransport();
+	transport.bpm.value = 80;
+	if (midiIn) {
+		midiIn.addEventListener("midimessage", onMidiMessage);
+	}
+	mainScreen.addEventListener("keydown", onKey);
+	mainScreen.addEventListener("keyup", onKey);
+	gameOverDialog.addEventListener("close", startLevel);
+	startLevel();
+}
+
+function startLevel() {
+	call = [];
+	measure = 0;
+	levelNode.textContent = level + 1;
+	scoreNode.textContent = score;
+	const transport = Tone.getTransport();
+	transport.schedule(schedTime => loopPlayer.start(schedTime), "0:0:0");
+	scheduleNewCall();
+	transport.start();
+}
+
+function scheduleNewCall() {
+	Tone.getTransport().schedule(newCall, { "1m": measure + 1, "32n": 31 });
+}
+
+// Get a random index in an array.
+function randomIndex(length) {
+	return Math.min(
+		Math.floor(Math.random() * length),
+		length - 1
+	);
+}
+
+function newCall() {
+	checkResponse();
+	correctNotes = 0;
+	call = [];
+	if (checkLevel()) {
+		return;
+	}
+	let lastNoteNum;
+	// We measure in sixteenths for simplicity.
+	let sixteenths = 0;
+	while (sixteenths < 16) {
+		let noteNum;
+		do {
+			noteNum = randomIndex(scale.length);
+		} while (sixteenths != 0 && noteNum == lastNoteNum);
+		lastNoteNum = noteNum;
+		const note = scale[noteNum];
+		const time = { "16n": sixteenths };
+		call.push({ note, time });
+		const lengths = LEVELS[level].lengths;
+		if (lengths.length == 1) {
+			sixteenths += lengths[0];
+		} else {
+			const lengthIndex = randomIndex(lengths.length);
+			sixteenths += lengths[lengthIndex];
+		}
+	}
+	// We need this last item to release (stop) the synth.
+	call.push({ time: "1:0:0" });
+	const part = new Tone.Part((time, value) => {
+		if (value.note) {
+			value.absTime = time;
+			callSynth.triggerAttack(value.note, time);
+		} else {
+			callSynth.triggerRelease(time);
+		}
+	}, call);
+	// We don't want the last item when checking the response though.
+	call.pop();
+	measure += 2;
+	part.start(`${measure}:0:0`);
+	scheduleNewCall();
+}
+
+// Handle a note on (press) from MIDI or computer keyboard.
+function respNoteOn(freq) {
+	lastRespNote = freq.toNote();
+	respSynth.triggerAttack(freq, respSynth.immediate());
+	checkNote(freq.toNote());
+}
+
+// Handle a note off (release) from MIDI or computer keyboard.
+function respNoteOff(freq) {
+	if (freq.toNote() == lastRespNote) {
+		respSynth.triggerRelease(respSynth.immediate());
+		lastRespNote = null;
+	}
+}
+
+function onMidiMessage(event) {
+	if (event.data[0] >= MIDI_NOTE_ON_C0 && event.data[0] <= MIDI_NOTE_ON_C15) {
+		respNoteOn(Tone.Frequency(event.data[1], "midi"));
+	} else if (
+		event.data[0] >= MIDI_NOTE_OFF_C0 && event.data[0] <= MIDI_NOTE_OFF_C15
+	) {
+		respNoteOff(Tone.Frequency(event.data[1], "midi"));
+	}
+}
+
+function onKey(event) {
+	if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
+		return;
+	}
+	const keyIndex = keyCodes.indexOf(event.code);
+	if (keyIndex == -1) {
+		return;
+	}
+	const freq = Tone.Frequency(scale[keyIndex]);
+	if (event.type == "keydown") {
+		// Ignore key repeat.
+		if (freq.toNote() == lastRespNote) {
+			return;
+		}
+		respNoteOn(freq);
+	} else {
+		respNoteOff(freq);
+	}
+}
+
+function checkNote(respNote) {
+	const measureLen = Tone.Time("1m").toSeconds();
+	for (const callNote of call) {
+		const expectedTime = callNote.absTime + measureLen;
+		if (Math.abs(Tone.context.currentTime - expectedTime) < 0.2) {
+			if (callNote.note == respNote) {
+				++correctNotes;
+				return;
+			}
+		}
+	}
+	--correctNotes;
+}
+
+function checkResponse() {
+	if (call.length == 0) {
+		return;
+	}
+	if (correctNotes == call.length) {
+		goodPlayer.start(goodPlayer.immediate());
+		++score;
+		scoreNode.textContent = score;
+	} else {
+		++mistakes;
+		if (mistakes == 5) {
+			gameOver();
+			return;
+		}
+		badPlayer.start(badPlayer.immediate());
+	}
+}
+
+function checkLevel() {
+	if (!LEVELS[level].winScore || score < LEVELS[level].winScore) {
+		return false;
+	}
+	++level;
+	const transport = Tone.getTransport();
+	loopPlayer.stop();
+	transport.stop();
+	transport.cancel();
+	nextLevelPlayer.onstop = () => {
+		nextLevelPlayer.onstop = null;
+		startLevel();
+	}
+	nextLevelPlayer.start(nextLevelPlayer.immediate());
+	levelNode.textContent = level + 1;
+	// Delay screen reader announcement a little so the sound doesn't clobber it.
+	setTimeout(
+		() => document.ariaNotify(`Level ${level + 1}, score ${score}`),
+		500
+	);
+	return true;
+}
+
+function gameOver() {
+	loopPlayer.stop();
+	respSynth.triggerRelease();
+	const transport = Tone.getTransport();
+	transport.stop();
+	transport.cancel();
+	score = 0;
+	level = 0;
+	mistakes = 0;
+	gameOverPlayer.start(gameOverPlayer.immediate());
+	gameOverDialog.showModal();
+}
+
+document.getElementById("useMidi").addEventListener("click", () => init(true));
+document.getElementById("useKeyboard").addEventListener(
+	"click", () => init(false)
+);
+</script>
