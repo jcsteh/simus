@@ -102,13 +102,19 @@ const loopPlayers = [];
 async function init(useMidi) {
 	document.getElementById("startScreen").hidden = true;
 	if (useMidi) {
-		const midi = await navigator.requestMIDIAccess();
 		const inputSel = document.getElementById("midiInput");
-		for (const input of midi.inputs.values()) {
-			const option = document.createElement("option");
-			option.dataset.id = input.id;
-			option.textContent = input.name;
-			inputSel.append(option);
+		let midi = null;
+		try {
+			midi = await navigator.requestMIDIAccess();
+		} catch {
+		}
+		if (midi) {
+			for (const input of midi.inputs.values()) {
+				const option = document.createElement("option");
+				option.dataset.id = input.id;
+				option.textContent = input.name;
+				inputSel.append(option);
+			}
 		}
 		if (inputSel.options.length == 0) {
 			document.getElementById("midiInputForm").hidden = true;
