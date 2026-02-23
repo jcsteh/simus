@@ -5,7 +5,7 @@
 <h1>Simus</h1>
 <div id="startScreen">
 	<p>Copyright 2026 James Teh</p>
-	<p>Version 5</p>
+	<p>Version 6</p>
 	<p>
 		Simus (pronounced sigh muse) is a musical memory game.
 		The game plays a bar of random notes and you have to play it back with correct notes and timing.
@@ -14,12 +14,12 @@
 		On a computer keyboard, the letters a, s, d, f, g, h, j and k correspond to the 8 notes of the scale.
 	</p>
 	<p>
-		As you level up, the patterns get more rhythmically complicated.
+		As you level up, the patterns get faster or more rhythmically complicated.
 		If you make 5 mistakes, it's game over; you must start again from the beginning.
 		Every 10 correct answers, you redeem a mistake if you've made one.
 	</p>
 	<p>
-		When the game starts, you will have 2 bars without melody.
+		When each level starts, you will have a few bars of music without melody.
 		You can use this time to play the keyboard to calibrate your ear to the pitch of the notes.
 	</p>
 	<p>
@@ -57,9 +57,15 @@ const MIDI_NOTE_OFF_C0 = 0x80;
 const MIDI_NOTE_OFF_C15 = MIDI_NOTE_OFF_C0 + 15;
 const LEVELS = [
 	// lengths are measured in sixteenths.
-	{ lengths: [4], winScore: 20 },
-	{ lengths: [4, 2], winScore: 50 },
-	{ lengths: [4, 2, 1], winScore: 100 },
+	{ lengths: [4], winScore: 15, loop: 0 },
+	{ lengths: [4], winScore: 30, loop: 1 },
+	{ lengths: [4, 2], winScore: 45, loop: 0 },
+	{ lengths: [4, 2], winScore: 60, loop: 1 },
+	// Specifying a length multiple times gives it higher probability.
+	{ lengths: [4, 2, 2], loop: 0, winScore: 75 },
+	{ lengths: [4, 2, 2], loop: 1, winScore: 90 },
+	{ lengths: [4, 4, 2, 2, 1], loop: 0, winScore: 105 },
+	{ lengths: [4, 4, 2, 2, 1], loop: 1 },
 ];
 
 const scale = ["A3", "B3", "C4", "D4", "E4", "F4", "G4", "A4"];
@@ -91,7 +97,7 @@ let goodPlayer;
 let badPlayer;
 let nextLevelPlayer;
 let newLifePlayer;
-let loopPlayer;
+const loopPlayers = [];
 
 async function init(useMidi) {
 	document.getElementById("startScreen").hidden = true;
@@ -145,12 +151,19 @@ async function start() {
 	newLifePlayer = new Tone.Player({
 		url: "newLife.wav", volume: -3 }
 	).toDestination();
-	loopPlayer = new Tone.Player({ loop: true, volume: -3 }).toDestination();
+	loopPlayers.push(new Tone.Player({ loop: true, volume: -3 }).toDestination());
+	// We store the bpm on loopPlayers for convenience, but we have to set that
+	// via the transport ourselves later.
+	loopPlayers[0].bpm = 80;
 	// We want to start the loop immediately, but we can't start it until the
 	// buffer is loaded. Wait for it to load.
-	await loopPlayer.load("loop1.mp3");
+	await loopPlayers[0].load("loop1.mp3");
+	loopPlayers.push(new Tone.Player({
+		url: "loop2.mp3", loop: true, volume: -3
+	}).toDestination());
+	loopPlayers[1].bpm = 100;
+	loopPlayers[1].measures = 4;
 	const transport = Tone.getTransport();
-	transport.bpm.value = 80;
 	if (midiIn) {
 		midiIn.addEventListener("midimessage", onMidiMessage);
 	}
@@ -162,12 +175,17 @@ async function start() {
 
 function startLevel() {
 	call = [];
-	measure = 0;
 	levelNode.textContent = level + 1;
 	scoreNode.textContent = score;
 	const transport = Tone.getTransport();
+	const loopPlayer = loopPlayers[LEVELS[level].loop];
 	transport.schedule(schedTime => loopPlayer.start(schedTime), "0:0:0");
+	// We play the loop once by itself before playing a call melody. Each turn
+	// is 2 measures, so if the loop is longer than that, add those extra
+	// measures here so we schedule the first call correctly.
+	measure = loopPlayer.measures ? loopPlayer.measures - 2 : 0;
 	scheduleNewCall();
+	transport.bpm.value = loopPlayer.bpm;
 	transport.start();
 }
 
@@ -318,7 +336,7 @@ function checkLevel() {
 	if (!LEVELS[level].winScore || score < LEVELS[level].winScore) {
 		return false;
 	}
-	++level;
+	const loopPlayer = loopPlayers[LEVELS[level].loop];
 	const transport = Tone.getTransport();
 	loopPlayer.stop();
 	transport.stop();
@@ -328,6 +346,7 @@ function checkLevel() {
 		startLevel();
 	}
 	nextLevelPlayer.start(nextLevelPlayer.immediate());
+	++level;
 	levelNode.textContent = level + 1;
 	// Delay screen reader announcement a little so the sound doesn't clobber it.
 	setTimeout(
@@ -338,6 +357,7 @@ function checkLevel() {
 }
 
 function gameOver() {
+	const loopPlayer = loopPlayers[LEVELS[level].loop];
 	loopPlayer.stop();
 	callSynth.triggerRelease();
 	respSynth.triggerRelease();
