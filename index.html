@@ -22,6 +22,9 @@
 		When the game starts, you will have 2 bars without melody.
 		You can use this time to play the keyboard to calibrate your ear to the pitch of the notes.
 	</p>
+	<p>
+		You can press escape to end the game early.
+	</p>
 	<p><button id="useMidi">Use MIDI input</button></p>
 	<p><button id="useKeyboard">Use computer keyboard only</button></p>
 </div>
@@ -253,6 +256,11 @@ function onKey(event) {
 	if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) {
 		return;
 	}
+	if (event.key == "Escape" && event.type == "keydown") {
+		event.preventDefault();
+		gameOver();
+		return;
+	}
 	const keyIndex = keyCodes.indexOf(event.code);
 	if (keyIndex == -1) {
 		return;
@@ -331,12 +339,13 @@ function checkLevel() {
 
 function gameOver() {
 	loopPlayer.stop();
+	callSynth.triggerRelease();
 	respSynth.triggerRelease();
 	const transport = Tone.getTransport();
 	transport.stop();
 	transport.cancel();
 	gameOverMessage.textContent =
-		`You reached level ${level + 1} with a score of ${ score }.`;
+		`You reached level ${level + 1} with a score of ${score}.`;
 	score = 0;
 	level = 0;
 	mistakes = 0;
