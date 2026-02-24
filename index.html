@@ -196,6 +196,8 @@ function startLevel() {
 }
 
 function scheduleNewCall() {
+	// Schedule newCall() to run a little bit before 2 measures from now,
+	// specifically 1 measure and 31 thirty-second notes.
 	Tone.getTransport().schedule(newCall, { "1m": measure + 1, "32n": 31 });
 }
 
@@ -219,6 +221,9 @@ function newCall() {
 	let sixteenths = 0;
 	while (sixteenths < 16) {
 		let noteNum;
+		// Choose random notes until we get one that isn't the same as the previous
+		// note. This is because it can be hard to distinguish repeated notes as
+		// separate notes.
 		do {
 			noteNum = randomIndex(scale.length);
 		} while (sixteenths != 0 && noteNum == lastNoteNum);
@@ -291,8 +296,7 @@ function onKey(event) {
 	}
 	const freq = Tone.Frequency(scale[keyIndex]);
 	if (event.type == "keydown") {
-		// Ignore key repeat.
-		if (freq.toNote() == lastRespNote) {
+		if (event.repeat) {
 			return;
 		}
 		respNoteOn(freq);
